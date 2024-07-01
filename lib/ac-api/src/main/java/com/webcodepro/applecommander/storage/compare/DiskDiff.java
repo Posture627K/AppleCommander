@@ -186,57 +186,59 @@ public class DiskDiff {
     }
     
     /** Compare by filename. This accounts for names only in disk A, only in disk B, or different but same-named. */
+    /*
+	    Fixing code Smells 2024 Yingzhe Xu
+		    Refactored Feature Envy compareByFileContent()
+ 	*/
     public void compareByFileName(FormattedDisk formattedDiskA, FormattedDisk formattedDiskB) {
         try {
-            Map<String,List<FileTuple>> filesA = FileStreamer.forDisk(formattedDiskA)
-                    .includeTypeOfFile(TypeOfFile.FILE)
-                    .recursive(true)
-                    .stream()
-                    .collect(Collectors.groupingBy(FileTuple::fullPath));
-            Map<String,List<FileTuple>> filesB = FileStreamer.forDisk(formattedDiskB)
-                    .includeTypeOfFile(TypeOfFile.FILE)
-                    .recursive(true)
-                    .stream()
-                    .collect(Collectors.groupingBy(FileTuple::fullPath));
-            
-            Set<String> pathsOnlyA = new HashSet<>(filesA.keySet());
-            pathsOnlyA.removeAll(filesB.keySet());
-            if (!pathsOnlyA.isEmpty()) {
-                results.addError("Files only in %s: %s", formattedDiskA.getFilename(), String.join(", ", pathsOnlyA));
-            }
+            Map<String, List<FileTuple>> filesA = getFileMap(formattedDiskA);
+            Map<String, List<FileTuple>> filesB = getFileMap(formattedDiskB);
 
-            Set<String> pathsOnlyB = new HashSet<>(filesB.keySet());
-            pathsOnlyB.removeAll(filesA.keySet());
-            if (!pathsOnlyB.isEmpty()) {
-                results.addError("Files only in %s: %s", formattedDiskB.getFilename(), String.join(", ", pathsOnlyB));
-            }
-            
-            Set<String> pathsInAB = new HashSet<>(filesA.keySet());
-            pathsInAB.retainAll(filesB.keySet());
-            for (String path : pathsInAB) {
-                List<FileTuple> tuplesA = filesA.get(path);
-                List<FileTuple> tuplesB = filesB.get(path);
+            reportExclusiveFiles(filesA, filesB, formattedDiskA, formattedDiskB);
+            reportCommonFiles(filesA, filesB);
 
-                // Since this is by name, we expect a single file; report oddities
-                FileTuple tupleA = tuplesA.get(0);
-                if (tuplesA.size() > 1) {
-                    results.addWarning("Path %s on disk %s has %d entries.", path, formattedDiskA.getFilename(), tuplesA.size());
-                }
-                FileTuple tupleB = tuplesB.get(0);
-                if (tuplesB.size() > 1) {
-                    results.addWarning("Path %s on disk %s has %d entries.", path, formattedDiskB.getFilename(), tuplesB.size());
-                }
-                
-                // Do our own custom compare so we can capture a description of differences:
-                FileEntryReader readerA = FileEntryReader.get(tupleA.fileEntry);
-                FileEntryReader readerB = FileEntryReader.get(tupleB.fileEntry);
-                List<String> differences = compare(readerA, readerB);
-                if (!differences.isEmpty()) {
-                    results.addWarning("Path %s differ: %s", path, String.join(", ", differences));
-                }
-            }
         } catch (DiskException ex) {
             results.addError(ex);
+        }
+    }
+
+    private Map<String, List<FileTuple>> getFileMap(FormattedDisk disk) throws DiskException {
+        return FileStreamer.forDisk(disk)
+                .includeTypeOfFile(TypeOfFile.FILE)
+                .recursive(true)
+                .stream()
+                .collect(Collectors.groupingBy(FileTuple::fullPath));
+    }
+
+    private void reportExclusiveFiles(Map<String, List<FileTuple>> filesA, Map<String, List<FileTuple>> filesB,
+                                      FormattedDisk diskA, FormattedDisk diskB) {
+        reportUniqueFiles("A", filesA.keySet(), filesB.keySet(), diskA);
+        reportUniqueFiles("B", filesB.keySet(), filesA.keySet(), diskB);
+    }
+
+    private void reportUniqueFiles(String label, Set<String> pathsThis, Set<String> pathsOther, FormattedDisk disk) {
+        Set<String> uniquePaths = new HashSet<>(pathsThis);
+        uniquePaths.removeAll(pathsOther);
+        if (!uniquePaths.isEmpty()) {
+            results.addError("Files only in disk %s (%s): %s", label, disk.getFilename(), String.join(", ", uniquePaths));
+        }
+    }
+
+    private void reportCommonFiles(Map<String, List<FileTuple>> filesA, Map<String, List<FileTuple>> filesB) {
+        Set<String> commonPaths = new HashSet<>(filesA.keySet());
+        commonPaths.retainAll(filesB.keySet());
+        for (String path : commonPaths) {
+            compareFileEntries(filesA.get(path).get(0), filesB.get(path).get(0));
+        }
+    }
+
+    private void compareFileEntries(FileTuple tupleA, FileTuple tupleB) {
+        FileEntryReader readerA = FileEntryReader.get(tupleA.fileEntry);
+        FileEntryReader readerB = FileEntryReader.get(tupleB.fileEntry);
+        List<String> differences = compare(readerA, readerB);
+        if (!differences.isEmpty()) {
+            results.addWarning("Files %s and %s differ in: %s", tupleA.fullPath(), tupleB.fullPath(), String.join(", ", differences));
         }
     }
 

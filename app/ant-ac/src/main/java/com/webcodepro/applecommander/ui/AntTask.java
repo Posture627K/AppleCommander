@@ -5,43 +5,23 @@
  * Copyright (C) 2003-2022 by John B. Matthews
  * matthewsj at users.sourceforge.net
  *
- * This program is free software; you can redistribute it and/or modify it 
- * under the terms of the GNU General Public License as published by the 
- * Free Software Foundation; either version 2 of the License, or (at your 
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
  * option) any later version.
  *
- * This program is distributed in the hope that it will be useful, but 
- * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY 
- * or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License 
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
  * for more details.
  *
- * You should have received a copy of the GNU General Public License along 
- * with this program; if not, write to the Free Software Foundation, Inc., 
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
  * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 package com.webcodepro.applecommander.ui;
 
 import java.io.FileInputStream;
-
-/*
- * Copyright (C) 2012 by David Schmidt
- * david__schmidt at users.sourceforge.net
- *
- * This program is free software; you can redistribute it and/or modify it 
- * under the terms of the GNU General Public License as published by the 
- * Free Software Foundation; either version 2 of the License, or (at your 
- * option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but 
- * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY 
- * or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License 
- * for more details.
- *
- * You should have received a copy of the GNU General Public License along 
- * with this program; if not, write to the Free Software Foundation, Inc., 
- * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- */
-
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -53,315 +33,213 @@ import com.webcodepro.applecommander.storage.Disk;
 import com.webcodepro.applecommander.storage.DiskException;
 import com.webcodepro.applecommander.storage.FormattedDisk;
 
-public class AntTask extends Task
-{
-	public void execute() throws BuildException
-	{
-		/*
-		 * Commands: 
-		 * dos: <imagename> <filename> <type>
-		 * as: <imagename> [<filename>] 
-		 * d: <imagename> <filename>
-		 * e: <imagename> <filename>
-		 * i: <imagename>
-		 * k/u: <imagename> <filename>
-		 * ls/l/ll: <imagename>
-		 * n: <imagename> <volname> 
-		 * p: <imagename> <filename> <type> [<address>]
-		 * x: <imagename> <outputpath>
-		 * dos140: <imagename> <volname>
-		 * pro140/pro800: <imagename> <volname>
-		 * pas140/pas800: <imagename> <volname>
-		 * convert: <filename> <imagename> [<sizeblocks>]
-		 */
-		if (_command.equals("i"))
-		{
-			try
-			{
-				String[] onlyOneImage = { "nonsense", _imageName };
-				com.webcodepro.applecommander.ui.ac.getDiskInfo(onlyOneImage);
+/*
+ * Copyright (C) 2012 by David Schmidt
+ * david__schmidt at users.sourceforge.net
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
+ * option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+ * for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ */
+
+
+/*
+	Fixing code Smells 2024 Yingzhe Xu
+		Refactored Long method execute()
+ */
+public class AntTask extends Task {
+
+	private boolean failOnError = true;
+	private String input = null;
+	private String output = null;
+	private String command = null;
+	private String imageName = null;
+	private String fileName = null;
+	private String volumeName = "ACDISK";
+	private String outputPath = null;
+	private String type = null;
+	private String address = "0x2000";
+	private String sizeBlocks = "0";
+
+	public void execute() throws BuildException {
+		try {
+			switch (command) {
+				case "i":
+					handleInfo();
+					break;
+				case "e":
+				case "g":
+					handleFileExtraction();
+					break;
+				case "p":
+				case "cc65":
+				case "as":
+					handleFilePut();
+					break;
+				case "d":
+					handleFileDeletion();
+					break;
+				case "n":
+					handleSetDiskName();
+					break;
+				case "k":
+				case "u":
+					handleFileLocking();
+					break;
+				case "ls":
+				case "l":
+				case "ll":
+					handleDirectoryListing();
+					break;
+				case "dos140":
+					createDosDisk(Disk.APPLE_140KB_DISK);
+					break;
+				case "pro800":
+				case "pro140":
+					createProDisk(command.equals("pro800") ? Disk.APPLE_800KB_DISK : Disk.APPLE_140KB_DISK);
+					break;
+				case "pas800":
+				case "pas140":
+					createPasDisk(command.equals("pas800") ? Disk.APPLE_800KB_DISK : Disk.APPLE_140KB_DISK);
+					break;
+				case "x":
+					handleFileExtractionToPath();
+					break;
+				case "convert":
+					handleConvert();
+					break;
+				default:
+					throw new BuildException("Command \"" + command + "\" not implemented.");
 			}
-			catch (Exception ex)
-			{
-				if (_failonerror)
-					throw new BuildException(ex);
-				else
-					System.out.println(ex.getMessage());
-			}
-		}
-		else if (_command.equals("e") || _command.equals("g"))
-		{
-			PrintStream outfile = System.out;
-			try
-			{
-				if (_output != null)
-				{
-					outfile = new PrintStream(new FileOutputStream(_output));
-				}
-				com.webcodepro.applecommander.ui.ac.getFile(_imageName, _fileName, _command.equals("e"), outfile);
-			}
-			catch (Exception ex)
-			{
-				if (_failonerror)
-					throw new BuildException(ex);
-				else
-					System.out.println(ex.getMessage());
-			}
-		}
-		else if (_command.equals("p") || (_command.equals("cc65") || (_command.equals("cc65")) || (_command.equals("as"))))
-		{
-			try
-			{
-				if (_command.equals("p"))
-				{
-					com.webcodepro.applecommander.ui.ac.putFile(_input, _imageName, _fileName, _type, _address);
-				}
-				else if (_command.equals("cc65")) 
-				{
-					System.err.println("Note: 'cc65' is deprecated.  Please use 'as' or 'dos' as appropriate."); 
-					com.webcodepro.applecommander.ui.ac.putDOS(_input, _imageName, _fileName, _type);
-				}
-				else if (_command.equals("dos")) 
-				{
-					com.webcodepro.applecommander.ui.ac.putDOS(_input, _imageName, _fileName, _type);
-				}
-				else {
-					com.webcodepro.applecommander.ui.ac.putAppleSingle(_imageName, _fileName,
-							new FileInputStream(_input));
-				}
-			}
-			catch (Exception ex)
-			{
-				if (_failonerror)
-					throw new BuildException(ex);
-				else
-					System.out.println(ex.getMessage());
-			}
-		}
-		else if (_command.equals("d"))
-		{
-			try
-			{
-				com.webcodepro.applecommander.ui.ac.deleteFile(_imageName, _fileName);
-			}
-			catch (IOException|DiskException io)
-			{
-				if (_failonerror)
-					throw new BuildException(io);
-				else
-					System.out.println(io.getMessage());
-			}
-		}
-		else if (_command.equals("n"))
-		{
-			try
-			{
-				com.webcodepro.applecommander.ui.ac.setDiskName(_imageName, _volName);
-			}
-			catch (IOException|DiskException io)
-			{
-				if (_failonerror)
-					throw new BuildException(io);
-				else
-					System.out.println(io.getMessage());
-			}
-		}
-		else if (_command.equals("k") || _command.equals("u"))
-		{
-			try
-			{
-				if (_command.equals("k"))
-					com.webcodepro.applecommander.ui.ac.setFileLocked(_imageName, _fileName, true);
-				else // Assume unlock
-					com.webcodepro.applecommander.ui.ac.setFileLocked(_imageName, _fileName, false);
-			}
-			catch (IOException|DiskException io)
-			{
-				if (_failonerror)
-					throw new BuildException(io);
-				else
-					System.out.println(io.getMessage());
-			}
-		}
-		else if (_command.equals("ls") || _command.equals("l") || _command.equals("ll"))
-		{
-			try
-			{
-				String[] onlyOneImage = { "nonsense", _imageName };
-				if (_command.equals("ls"))
-					com.webcodepro.applecommander.ui.ac.showDirectory(DirectoryLister.text(FormattedDisk.FILE_DISPLAY_STANDARD), onlyOneImage);
-				else if (_command.equals("l"))
-					com.webcodepro.applecommander.ui.ac.showDirectory(DirectoryLister.text(FormattedDisk.FILE_DISPLAY_NATIVE), onlyOneImage);
-				else // Assume "ll"
-					com.webcodepro.applecommander.ui.ac.showDirectory(DirectoryLister.text(FormattedDisk.FILE_DISPLAY_DETAIL), onlyOneImage);
-			}
-			catch (IOException io)
-			{
-				if (_failonerror)
-					throw new BuildException(io);
-				else
-					System.out.println(io.getMessage());
-			}
-		}
-		else if (_command.equals("dos140"))
-		{
-			try
-			{
-				com.webcodepro.applecommander.ui.ac.createDosDisk(_imageName, Disk.APPLE_140KB_DISK);
-			}
-			catch (IOException io)
-			{
-				if (_failonerror)
-					throw new BuildException(io);
-				else
-					System.out.println(io.getMessage());
-			}
-		}
-		else if ((_command.equals("pro800") || _command.equals("pro140")))
-		{
-			try
-			{
-				if (_command.equals("pro800"))
-					com.webcodepro.applecommander.ui.ac.createProDisk(_imageName, _volName, Disk.APPLE_800KB_DISK);
-				else
-					com.webcodepro.applecommander.ui.ac.createProDisk(_imageName, _volName, Disk.APPLE_140KB_DISK);
-			}
-			catch (IOException io)
-			{
-				if (_failonerror)
-					throw new BuildException(io);
-				else
-					System.out.println(io.getMessage());
-			}
-		}
-		else if ((_command.equals("pas800") || _command.equals("pas140")))
-		{
-			try
-			{
-				if (_command.equals("pas800"))
-					com.webcodepro.applecommander.ui.ac.createPasDisk(_imageName, _volName, Disk.APPLE_800KB_DISK);
-				else
-					com.webcodepro.applecommander.ui.ac.createPasDisk(_imageName, _volName, Disk.APPLE_140KB_DISK);
-			}
-			catch (IOException io)
-			{
-				if (_failonerror)
-					throw new BuildException(io);
-				else
-					System.out.println(io.getMessage());
-			}
-		}
-		else if (_command.equals("x"))
-		{
-			try
-			{
-				com.webcodepro.applecommander.ui.ac.getFiles(_imageName, _outputPath);
-			}
-			catch (IOException|DiskException io)
-			{
-				if (_failonerror)
-					throw new BuildException(io);
-				else
-					System.out.println(io.getMessage());
-			}
-		}
-		else if (_command.equals("convert"))
-		{
-			try
-			{
-				com.webcodepro.applecommander.ui.ac.convert(_fileName, _imageName, Integer.parseInt(_sizeBlocks));
-			}
-			catch (IOException io)
-			{
-				if (_failonerror)
-					throw new BuildException(io);
-				else
-					System.out.println(io.getMessage());
-			}
-		}
-		else
-		{
-			throw new BuildException("Command \"" + _command + "\" not implemented.");
+		} catch (Exception ex) {
+			handleError(ex);
 		}
 	}
 
-	public void setCommand(String command)
-	{
-		_command = command;
+	private void handleInfo() throws Exception {
+		String[] onlyOneImage = { "nonsense", imageName };
+		com.webcodepro.applecommander.ui.ac.getDiskInfo(onlyOneImage);
 	}
 
-	public void setInput(String input)
-	{
-		_input = input;
+	private void handleFileExtraction() throws Exception {
+		try (PrintStream outfile = output != null ? new PrintStream(new FileOutputStream(output)) : System.out) {
+			com.webcodepro.applecommander.ui.ac.getFile(imageName, fileName, command.equals("e"), outfile);
+		}
 	}
 
-	public void setOutput(String output)
-	{
-		_output = output;
+	private void handleFilePut() throws Exception {
+		if (command.equals("p")) {
+			com.webcodepro.applecommander.ui.ac.putFile(input, imageName, fileName, type, address);
+		} else if (command.equals("cc65") || command.equals("as")) {
+			com.webcodepro.applecommander.ui.ac.putDOS(input, imageName, fileName, type);
+			if (command.equals("cc65")) {
+				System.err.println("Note: 'cc65' is deprecated.  Please use 'as' or 'dos' as appropriate.");
+			}
+		} else {
+			com.webcodepro.applecommander.ui.ac.putAppleSingle(imageName, fileName, new FileInputStream(input));
+		}
 	}
 
-	public void setImageName(String imageName)
-	{
-		_imageName = imageName;
+	private void handleFileDeletion() throws IOException, DiskException {
+		com.webcodepro.applecommander.ui.ac.deleteFile(imageName, fileName);
 	}
 
-	public void setFileName(String fileName)
-	{
-		_fileName = fileName;
+	private void handleSetDiskName() throws IOException, DiskException {
+		com.webcodepro.applecommander.ui.ac.setDiskName(imageName, volumeName);
 	}
 
-	public void setOutputPath(String outputPath)
-	{
-		_outputPath = outputPath;
+	private void handleFileLocking() throws IOException, DiskException {
+		com.webcodepro.applecommander.ui.ac.setFileLocked(imageName, fileName, command.equals("k"));
 	}
 
-	public void setVolName(String volName)
-	{
-		_volName = volName;
+	private void handleDirectoryListing() throws IOException {
+		String[] onlyOneImage = { "nonsense", imageName };
+		int displayType = command.equals("ls") ? FormattedDisk.FILE_DISPLAY_STANDARD :
+				command.equals("l") ? FormattedDisk.FILE_DISPLAY_NATIVE :
+						FormattedDisk.FILE_DISPLAY_DETAIL;
+		com.webcodepro.applecommander.ui.ac.showDirectory(DirectoryLister.text(displayType), onlyOneImage);
 	}
 
-	public void setType(String type)
-	{
-		_type = type;
+	private void createDosDisk(int diskType) throws IOException {
+		com.webcodepro.applecommander.ui.ac.createDosDisk(imageName, diskType);
 	}
 
-	public void setAddress(String address)
-	{
-		_address = address;
+	private void createProDisk(int diskType) throws IOException {
+		com.webcodepro.applecommander.ui.ac.createProDisk(imageName, volumeName, diskType);
 	}
 
-	public void setSizeBlocks(String sizeBlocks)
-	{
-		_sizeBlocks = sizeBlocks;
+	private void createPasDisk(int diskType) throws IOException {
+		com.webcodepro.applecommander.ui.ac.createPasDisk(imageName, volumeName, diskType);
 	}
 
-	public void setFailOnError(String failonerror)
-	{
-		if (failonerror.equalsIgnoreCase("true"))
-			_failonerror = true;
-		if (failonerror.equalsIgnoreCase("false"))
-			_failonerror = false;
+	private void handleFileExtractionToPath() throws IOException, DiskException {
+		com.webcodepro.applecommander.ui.ac.getFiles(imageName, outputPath);
 	}
 
-	boolean _failonerror = true;
+	private void handleConvert() throws IOException {
+		com.webcodepro.applecommander.ui.ac.convert(fileName, imageName, Integer.parseInt(sizeBlocks));
+	}
 
-	String _input = null;
+	private void handleError(Exception ex) throws BuildException {
+		if (failOnError) {
+			throw new BuildException(ex);
+		} else {
+			System.out.println(ex.getMessage());
+		}
+	}
 
-	String _output = null;
+	// Setter methods
+	public void setCommand(String command) {
+		this.command = command;
+	}
 
-	String _command = null;
+	public void setInput(String input) {
+		this.input = input;
+	}
 
-	String _imageName = null;
+	public void setOutput(String output) {
+		this.output = output;
+	}
 
-	String _fileName = null;
+	public void setImageName(String imageName) {
+		this.imageName = imageName;
+	}
 
-	String _volName = "ACDISK";
+	public void setFileName(String fileName) {
+		this.fileName = fileName;
+	}
 
-	String _outputPath = null;
+	public void setOutputPath(String outputPath) {
+		this.outputPath = outputPath;
+	}
 
-	String _type = null;
+	public void setVolName(String volName) {
+		this.volumeName = volName;
+	}
 
-	String _address = "0x2000";
+	public void setType(String type) {
+		this.type = type;
+	}
 
-	String _sizeBlocks = "0";
+	public void setAddress(String address) {
+		this.address = address;
+	}
+
+	public void setSizeBlocks(String sizeBlocks) {
+		this.sizeBlocks = sizeBlocks;
+	}
+
+	public void setFailOnError(String failOnError) {
+		this.failOnError = Boolean.parseBoolean(failOnError);
+	}
 }

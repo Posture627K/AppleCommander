@@ -203,131 +203,116 @@ public class Disk {
 	 * Construct a Disk and load the specified file.
 	 * Read in the entire contents of the file.
 	 */
+	/*
+	Fixing code Smells 2024 Yingzhe Xu
+		Refactored Complex Method Disk(String filename, int startBlocks, boolean knownProDOSOrder) throws IOException {
+ 	*/
 	public Disk(String filename, int startBlocks, boolean knownProDOSOrder) throws IOException {
 		this.filename = filename;
-		int diskSize = 0;
-		byte[] diskImage = null;
+		byte[] diskImage = loadDiskImage(filename, startBlocks);
+		boolean is2img = has2IMGHeader(diskImage);
 		byte[] diskImageDC42 = null;
 
+		if (!is2img && Disk.isDC42(diskImage)) {
+			diskImageDC42 = processDC42Image(diskImage);
+		}
+
+		initializeDiskImageManager(diskImage, diskImageDC42, is2img);
+		setDiskImageOrder(knownProDOSOrder);
+	}
+	private byte[] loadDiskImage(String filename, int startBlocks) throws IOException {
 		if (isSDK() || isSHK() || isBXY()) {
-			// If we have an SDK, unpack it and send along the byte array
-			// If we have a SHK, build a new disk and unpack the contents on to it
-			diskImage = com.webcodepro.applecommander.util.ShrinkItUtilities.unpackSHKFile(filename, startBlocks);
-			diskSize = diskImage.length;
-			// Since we don't want to overwrite their shrinkit with a raw ProDOS image,
-			// add a .po extension to it
-			this.filename += ".po"; //$NON-NLS-1$
+			byte[] diskImage = com.webcodepro.applecommander.util.ShrinkItUtilities.unpackSHKFile(filename, startBlocks);
+			this.filename += ".po"; // Add .po extension
+			return diskImage;
 		} else {
-			File file = new File(filename);
-			diskSize = (int) file.length();
-			InputStream input = new FileInputStream(file);
-			if (isCompressed()) {
-				input = new GZIPInputStream(input);
-			}
-			ByteArrayOutputStream diskImageByteArray = new ByteArrayOutputStream(diskSize);
+			return readFileContent(filename);
+		}
+	}
+	private byte[] readFileContent(String filename) throws IOException {
+		File file = new File(filename);
+		try (InputStream input = isCompressed() ? new GZIPInputStream(new FileInputStream(file)) : new FileInputStream(file);
+			 ByteArrayOutputStream diskImageByteArray = new ByteArrayOutputStream((int) file.length())) {
 			StreamUtil.copy(input, diskImageByteArray);
-			diskImage = diskImageByteArray.toByteArray();
+			return diskImageByteArray.toByteArray();
 		}
-		boolean is2img = false;
-		/* Does it have the 2IMG header? */
-		if ((diskImage[0] == 0x32) && (diskImage[1] == 0x49) && (diskImage[2] == 0x4D) && (diskImage[3]) == 0x47) {
-			is2img = true;
+	}
+	private boolean has2IMGHeader(byte[] diskImage) {
+		return diskImage[0] == 0x32 && diskImage[1] == 0x49 && diskImage[2] == 0x4D && diskImage[3] == 0x47;
+	}
+	private byte[] processDC42Image(byte[] diskImage) {
+		long end = AppleUtil.getLongValue(diskImage, 0x40);
+		if (end < diskImage.length - 83) {
+			byte[] diskImageDC42 = new byte[(int) end];
+			System.arraycopy(diskImage, 84, diskImageDC42, 0, (int) end);
+			this.filename += ".po"; // Add .po extension
+			return diskImageDC42;
+		} else {
+			throw new IllegalArgumentException(textBundle.get("CommandLineDC42Bad"));
 		}
-		/* Does it have the DiskCopy 4.2 header? */
-		else if (Disk.isDC42(diskImage)) {
-			isDC42 = true;
-			long end = AppleUtil.getLongValue(diskImage,0x40);
-			if (end < diskImage.length - 83) {
-				diskImageDC42 = new byte[(int)end];
-				System.arraycopy(diskImage, 84, diskImageDC42, 0, (int)end); // 84 bytes into the DC42 stream is where the real data starts
-				diskImageManager = new ByteArrayImageLayout(diskImageDC42);
-				// Since we don't want to overwrite their dmg or dc42 with a raw ProDOS image,
-				// add a .po extension to it
-				this.filename += ".po"; //$NON-NLS-1$
-			}
-			else
-				throw new IllegalArgumentException(textBundle.get("CommandLineDC42Bad")); //$NON-NLS-1$
-		}
-		if (is2img == true || diskImage.length == APPLE_800KB_DISK + UniversalDiskImageLayout.OFFSET 
-				|| diskImage.length == APPLE_5MB_HARDDISK + UniversalDiskImageLayout.OFFSET 
-				|| diskImage.length == APPLE_10MB_HARDDISK + UniversalDiskImageLayout.OFFSET 
-				|| diskImage.length == APPLE_20MB_HARDDISK + UniversalDiskImageLayout.OFFSET 
-				|| diskImage.length == APPLE_32MB_HARDDISK + UniversalDiskImageLayout.OFFSET) {
+	}
+	private void initializeDiskImageManager(byte[] diskImage, byte[] diskImageDC42, boolean is2img) {
+		if (is2img || isValidUniversalDiskImageSize(diskImage.length)) {
 			diskImageManager = new UniversalDiskImageLayout(diskImage);
-		} else if (isDC42) {
+		} else if (diskImageDC42 != null) {
 			diskImageManager = new ByteArrayImageLayout(diskImageDC42);
 		} else {
 			diskImageManager = new ByteArrayImageLayout(diskImage);
 		}
-
+	}
+	private boolean isValidUniversalDiskImageSize(int length) {
+		return length == APPLE_800KB_DISK + UniversalDiskImageLayout.OFFSET
+				|| length == APPLE_5MB_HARDDISK + UniversalDiskImageLayout.OFFSET
+				|| length == APPLE_10MB_HARDDISK + UniversalDiskImageLayout.OFFSET
+				|| length == APPLE_20MB_HARDDISK + UniversalDiskImageLayout.OFFSET
+				|| length == APPLE_32MB_HARDDISK + UniversalDiskImageLayout.OFFSET;
+	}
+	private void setDiskImageOrder(boolean knownProDOSOrder) {
 		ImageOrder dosOrder = new DosOrder(diskImageManager);
 		ImageOrder proDosOrder = new ProdosOrder(diskImageManager);
 
 		if (isSDK()) {
 			imageOrder = proDosOrder; // SDKs are always in ProDOS order
+			return;
+		}
+
+		int diskSize = diskImageManager.getPhysicalSize();
+		if (diskSize == APPLE_140KB_DISK) {
+			imageOrder = determineImageOrderFor140KB(dosOrder, proDosOrder, knownProDOSOrder);
 		} else {
-			/*
-			 * First step: test physical disk orders for viable file systems.
-			 */
-			int rc = -1;
-			if (diskSize == APPLE_140KB_DISK) {
-				// First, test the really-really likely orders/formats for
-				// 5-1/4" disks.
-				imageOrder = dosOrder;
-				if ((isProdosFormat() || isDosFormat()) && !knownProDOSOrder) {
-					rc = 0;
-				} else {
-					imageOrder = proDosOrder;
-					if (knownProDOSOrder || isProdosFormat() || isDosFormat() || isRdos33Format()) {
-						rc = 0;
-					}
-				}
-				if (rc == -1) {
-					/*
-				 	* Check filenames for something deterministic.
-				 	*/
-					if (isProdosOrder() || is2ImgOrder()) {
-						imageOrder = proDosOrder;
-						rc = 0;
-					} else if (isDosOrder()) {
-						imageOrder = dosOrder;
-						rc = 0;
-					} else if (isNibbleOrder()) {
-						imageOrder = new NibbleOrder(diskImageManager);
-						rc = 0;
-					}
-				}
-				if (rc == -1) {
-					/*
-					 * Ok, it's not one of those. Now, let's go back to DOS
-					 * order, and see if we recognize other things. If not,
-					 * we'll fall through to other processing later.
-					 */
-					imageOrder = dosOrder;
-					rc = testImageOrder();
-				}
-			}
-			if (rc == -1) {
-				imageOrder = proDosOrder;
-				rc = testImageOrder();
-				if (rc == -1) {
-					/*
-				 	* Couldn't find anything recognizable. Final step: 
-				 	* just punt and start testing filenames.
-				 	*/
-					if (isProdosOrder() || is2ImgOrder()) {
-						imageOrder = proDosOrder;
-					} else if (isDosOrder()) {
-						imageOrder = dosOrder;
-					} else if (isNibbleOrder()) {
-						imageOrder = new NibbleOrder(diskImageManager);
-					} else {
-						imageOrder = proDosOrder;
-					}
-				}
-			}
+			imageOrder = determineImageOrder(dosOrder, proDosOrder);
 		}
 	}
+	private ImageOrder determineImageOrderFor140KB(ImageOrder dosOrder, ImageOrder proDosOrder, boolean knownProDOSOrder) {
+		imageOrder = dosOrder;
+		if ((isProdosFormat() || isDosFormat()) && !knownProDOSOrder) {
+			return dosOrder;
+		} else {
+			imageOrder = proDosOrder;
+			if (knownProDOSOrder || isProdosFormat() || isDosFormat() || isRdos33Format()) {
+				return proDosOrder;
+			}
+		}
+		return fallbackImageOrder(proDosOrder, dosOrder);
+	}
+	private ImageOrder fallbackImageOrder(ImageOrder proDosOrder, ImageOrder dosOrder) {
+		if (isProdosOrder() || is2ImgOrder()) {
+			return proDosOrder;
+		} else if (isDosOrder()) {
+			return dosOrder;
+		} else if (isNibbleOrder()) {
+			return new NibbleOrder(diskImageManager);
+		}
+		return proDosOrder;
+	}
+	private ImageOrder determineImageOrder(ImageOrder dosOrder, ImageOrder proDosOrder) {
+		imageOrder = proDosOrder;
+		if (testImageOrder() == -1) {
+			imageOrder = fallbackImageOrder(proDosOrder, dosOrder);
+		}
+		return imageOrder;
+	}
+
 	
 	/**
 	 * Test the image order to see if we can recognize a file system. Returns: 0

@@ -202,28 +202,34 @@ public class ac {
 	 * to 0x801.
 	 */
 	public static void putAppleSoft(String imageName, String fileName) throws IOException, DiskException {
-	    File fakeTempSource = File.createTempFile("ac-", "bas");
-	    fakeTempSource.deleteOnExit();
+		File fakeTempSource = File.createTempFile("ac-", "bas");
+		fakeTempSource.deleteOnExit();
 		Configuration config = Configuration.builder().sourceFile(fakeTempSource).build();
 		Queue<Token> tokens = TokenReader.tokenize(System.in);
 		Parser parser = new Parser(tokens);
 		Program program = parser.parse();
 		byte[] data = Visitors.byteVisitor(config).dump(program);
-		
+
 		Name name = new Name(fileName);
 		File file = new File(imageName);
 		if (!file.canRead()){
-			throw new IOException("Unable to read input file named "+imageName+".");
+			throw new IOException("Unable to read input file named " + imageName + ".");
 		}
-		
+
 		Disk disk = new Disk(imageName);
 		FormattedDisk[] formattedDisks = disk.getFormattedDisks();
 		FormattedDisk formattedDisk = formattedDisks[0];
-		// Look through the supplied types and try to pick AppleSoft.  Otherwise, let's try "A".
-		String fileType = Arrays.asList(formattedDisk.getFiletypes()).stream()
+
+		/*
+			Fixing code Smells 2024 Yingzhe Xu
+   			Refactored Long Identifier: String fileType=Arrays.asList(formattedDisk.getFiletypes()).stream().filter(ft -> "A".equalsIgnoreCase(ft) || "BAS".equalsIgnoreCase(ft)).findFirst().orElse("A");
+   		*/
+		List<String> fileTypes = Arrays.asList(formattedDisk.getFiletypes());
+		String fileType = fileTypes.stream()
 				.filter(ft -> "A".equalsIgnoreCase(ft) || "BAS".equalsIgnoreCase(ft))
 				.findFirst()
 				.orElse("A");
+
 		FileEntry entry = name.createEntry(formattedDisk);
 		if (entry != null) {
 			entry.setFiletype(fileType);
@@ -235,6 +241,7 @@ public class ac {
 			formattedDisk.save();
 		}
 	}
+
 
 	/**
 	 * Put fileName from the local filesytem into the file named fileOnImageName on the disk named imageName;

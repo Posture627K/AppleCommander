@@ -88,55 +88,79 @@ public class ApplesoftTokenizer {
 	 * Answer with the next token in the Applesoft program.  This may be 
 	 * code, string pieces, line numbers.
 	 */
+
+	/*
+	Fixing code Smells 2024 Yingzhe Xu
+		Refactored Multi-faceted Abstraction getNextToken()
+ 	*/
 	public ApplesoftToken getNextToken() {
 		if (hasMoreTokens()) {
 			if (nextAddress == -1) {
-				nextAddress = AppleUtil.getWordValue(fileData, offset);
-				offset+= 2;
-				if (nextAddress == 0) {
-					// At end of file, ensure we don't try to continue processing...
-					offset = fileData.length;
-					return null;
-				}
-				int lineNumber = AppleUtil.getWordValue(fileData, offset);
-				offset+= 2;
-				return new ApplesoftToken(lineNumber);
+				return handleNewAddress();
 			}
 			byte byt = fileData[offset++];
 			if (byt == 0) {
 				nextAddress = -1;
 				return getNextToken();
 			} else if ((byt & 0x80) != 0) {
-				int token = AppleUtil.getUnsignedByte(byt) - 0x80;
-				if (token >= tokens.length) {
-					return new ApplesoftToken(byt, "<UNKNOWN TOKEN>"); //$NON-NLS-1$
-				}
-				return new ApplesoftToken(byt, tokens[token]);
-			} else if (byt == ':' || byt == ';' || byt == ',' || byt == '^'
-				|| byt == '+' || byt == '-' || byt == '*' || byt == '/') {
+				return handleTokenByte(byt);
+			} else if (isSpecialCharacter(byt)) {
 				return new ApplesoftToken(new String(new byte[] { byt }));
 			} else {
-				StringBuffer string = new StringBuffer();
-				while (true) {
-					char ch = (char)byt;
-					if (ch < 0x20) {
-						string.append("<CTRL-"); //$NON-NLS-1$
-						string.append((char)('@' + ch));
-						string.append('>');
-					} else {
-						string.append(ch);
-					}
-					byt = fileData[offset];
-					// FIXME: This is a hack to break on ":", ",", ";" but will fail on strings
-					if ((byt & 0x80) != 0 || byt == 0
-						|| byt == 0x3a || byt == 0x2c || byt == 0x3b) {
-						break;
-					}
-					offset++;
-				}
-				return new ApplesoftToken(string.toString());
+				return handleStringByte(byt);
 			}
 		}
 		return null;
 	}
+
+	private ApplesoftToken handleNewAddress() {
+		nextAddress = AppleUtil.getWordValue(fileData, offset);
+		offset += 2;
+		if (nextAddress == 0) {
+			// At end of file, ensure we don't try to continue processing...
+			offset = fileData.length;
+			return null;
+		}
+		int lineNumber = AppleUtil.getWordValue(fileData, offset);
+		offset += 2;
+		return new ApplesoftToken(lineNumber);
+	}
+
+	private ApplesoftToken handleTokenByte(byte byt) {
+		int token = AppleUtil.getUnsignedByte(byt) - 0x80;
+		if (token >= tokens.length) {
+			return new ApplesoftToken(byt, "<UNKNOWN TOKEN>"); //$NON-NLS-1$
+		}
+		return new ApplesoftToken(byt, tokens[token]);
+	}
+
+	private boolean isSpecialCharacter(byte byt) {
+		return byt == ':' || byt == ';' || byt == ',' || byt == '^'
+				|| byt == '+' || byt == '-' || byt == '*' || byt == '/';
+	}
+
+	private ApplesoftToken handleStringByte(byte byt) {
+		StringBuffer string = new StringBuffer();
+		while (true) {
+			char ch = (char) byt;
+			if (ch < 0x20) {
+				string.append("<CTRL-"); //$NON-NLS-1$
+				string.append((char) ('@' + ch));
+				string.append('>');
+			} else {
+				string.append(ch);
+			}
+			byt = fileData[offset];
+			if (isStringEnd(byt)) {
+				break;
+			}
+			offset++;
+		}
+		return new ApplesoftToken(string.toString());
+	}
+
+	private boolean isStringEnd(byte byt) {
+		return (byt & 0x80) != 0 || byt == 0 || byt == 0x3a || byt == 0x2c || byt == 0x3b;
+	}
+
 }
